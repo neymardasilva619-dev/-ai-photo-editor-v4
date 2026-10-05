@@ -10,12 +10,41 @@ def index():
 
 @app.get('/api/health')
 def health():
-    return jsonify(ok=True, configured=bool(os.environ.get('OPENAI_API_KEY')))
+    return jsonify(ok=True, configured=bool(os.environ.get('def data_url_to_bytes(s):
+    if not s:
+        raise ValueError('Invalid image data')
 
-def data_url_to_bytes(s):
-    if not s or ',' not in s: raise ValueError('Invalid image data')
-    head, body = s.split(',', 1)
-    return base64.b64decode(body)
+    if not isinstance(s, str):
+        raise ValueError('Invalid image data')
+
+    s = s.strip()
+
+    # Обычный Data URL:
+    # data:image/png;base64,AAAA...
+    if s.startswith('data:'):
+        if ',' not in s:
+            raise ValueError('Invalid image data')
+        head, body = s.split(',', 1)
+
+        if ';base64' not in head.lower():
+            raise ValueError('Image must be base64 data')
+    else:
+        # Также принимаем обычный Base64 без data:image/... префикса
+        body = s
+
+    body = ''.join(body.split())
+
+    if not body:
+        raise ValueError('Invalid image data')
+
+    try:
+        return base64.b64decode(body, validate=True)
+    except Exception:
+        try:
+            body += '=' * (-len(body) % 4)
+            return base64.b64decode(body)
+        except Exception:
+            raise ValueError('Invalid image data')
 
 @app.post('/api/edit')
 def edit():

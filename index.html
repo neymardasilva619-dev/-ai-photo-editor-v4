@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AI Photo Editor v4</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#101114;color:#eee;font-family:system-ui,-apple-system,Segoe UI,sans-serif}
+header{height:58px;padding:0 16px;border-bottom:1px solid #292b31;display:flex;align-items:center;justify-content:space-between}
+h1{font-size:18px;margin:0}.status{font-size:12px;color:#9ca0aa}.app{height:calc(100vh - 58px);display:grid;grid-template-columns:1fr 350px}
+.workspace{position:relative;display:flex;align-items:center;justify-content:center;background:#17191e;overflow:hidden;padding:18px}
+#stage{position:relative;max-width:100%;max-height:100%;display:none;box-shadow:0 12px 45px #000}
+#photo{display:block;max-width:calc(100vw - 410px);max-height:calc(100vh - 100px)}
+#mask{position:absolute;inset:0;cursor:crosshair}
+.empty{text-align:center;color:#a5a8b0}.panel{background:#1d1f24;border-left:1px solid #2b2d33;padding:14px;overflow:auto}
+.group{padding:0 0 14px;margin-bottom:14px;border-bottom:1px solid #2c2e34}.group h2{font-size:14px;margin:0 0 10px}
+button,.upload,select,input,textarea{font:inherit}button,.upload{border:0;border-radius:9px;padding:9px 11px;background:#30333b;color:#fff;cursor:pointer}
+button:hover,.upload:hover{background:#3a3d47}.primary{background:#7057ff}.primary:hover{background:#806aff}
+.row{display:flex;gap:7px;flex-wrap:wrap}.upload input{display:none}textarea{width:100%;min-height:85px;resize:vertical;background:#111318;border:1px solid #343741;border-radius:9px;color:#fff;padding:10px}
+.hint{font-size:12px;line-height:1.45;color:#989ca7;margin:8px 0}.tools{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+label.small{font-size:12px;color:#aaa;display:block;margin:8px 0 5px}
+input[type=range]{width:100%}.danger{background:#542f35}.success{background:#2d543c}
+.badge{display:inline-block;font-size:11px;padding:3px 7px;border-radius:99px;background:#30333b;color:#bbb}
+@media(max-width:850px){.app{grid-template-columns:1fr;height:auto}.workspace{height:58vh}.panel{border-left:0;border-top:1px solid #2b2d33}#photo{max-width:100%;max-height:52vh}}
+</style>
+</head>
+<body>
+<header><h1>✨ AI Photo Editor v4</h1><div id="status" class="status">Фото не загружено</div></header>
+<div class="app">
+<section class="workspace">
+<div id="empty" class="empty">Загрузите фотографию<br><br>
+<label class="upload">📷 Выбрать фото<input id="file" type="file" accept="image/*"></label></div>
+<div id="stage"><img id="photo"><canvas id="mask"></canvas></div>
+</section>
+<aside class="panel">
+<div class="group">
+<h2>Фото</h2><div class="row">
+<label class="upload">Загрузить<input id="file2" type="file" accept="image/*"></label>
+<button id="reset">Сбросить</button><button id="save" class="primary">Сохранить</button>
+</div></div>
+
+<div class="group">
+<h2>🎯 AI-редактирование <span class="badge">v4</span></h2>
+<p class="hint">Выделите область на фотографии кистью, затем напишите, что изменить. Если выделения нет, AI может обработать всё изображение.</p>
+<div class="tools">
+<button id="brush">🖌 Кисть</button><button id="erase">⌫ Стереть</button>
+<button id="clearMask">Очистить</button><button id="selectAll">Всё фото</button>
+</div>
+<label class="small">Размер кисти: <span id="sizeV">35</span> px</label>
+<input id="size" type="range" min="5" max="180" value="35">
+<label class="small">Команда AI</label>
+<textarea id="prompt" placeholder="Например: замени одежду на элегантный чёрный костюм, сохрани лицо и позу"></textarea>
+<button id="ai" class="primary" style="width:100%;margin-top:8px">✨ Изменить выделенную область AI</button>
+<p id="aiStatus" class="hint"></p>
+</div>
+
+<div class="group">
+<h2>🛠 Быстрые настройки</h2>
+<label class="small">Яркость <span id="bv">0</span></label><input id="brightness" type="range" min="-100" max="100" value="0">
+<label class="small">Контраст <span id="cv">0</span></label><input id="contrast" type="range" min="-100" max="100" value="0">
+<label class="small">Насыщенность <span id="sv">0</span></label><input id="saturation" type="range" min="-100" max="100" value="0">
+</div>
+<div class="group">
+<h2>↶ История</h2><div class="row"><button id="undo">Отменить</button><button id="redo">Повторить</button></div>
+</div>
+</aside>
+</div>
+
+<script>
+const file=document.querySelector('#file'), file2=document.querySelector('#file2');
+const photo=document.querySelector('#photo'), stage=document.querySelector('#stage'), mask=document.querySelector('#mask');
+const mctx=mask.getContext('2d'); const empty=document.querySelector('#empty');
+let source=null, drawing=false, erasing=false, brush=35, history=[], future=[], baseImage=null, loaded=false;
+let edits={brightness:0,contrast:0,saturation:0};
+
+function load(f){
+ if(!f)return; const u=URL.createObjectURL(f); source=u;
+ photo.onload=()=>{loaded=true;empty.style.display='none';stage.style.display='block';resizeMask();history=[];future=[];snapshot();document.querySelector('#status').textContent='Фото загружено ✓';};
+ photo.src=u;
+}
+file.addEventListener('change',e=>load(e.target.files[0])); file2.addEventListener('change',e=>load(e.target.files[0]));
+
+function resizeMask(){
+ const r=photo.getBoundingClientRect();
+ mask.width=Math.round(photo.clientWidth); mask.height=Math.round(photo.clientHeight);
+ mask.style.width=photo.clientWidth+'px'; mask.style.height=photo.clientHeight+'px';
+}
+window.addEventListener('resize',resizeMask);
+
+function pos(e){const r=mask.getBoundingClientRect();return [e.clientX-r.left,e.clientY-r.top]}
+function paint(e){
+ if(!drawing)return; const [x,y]=pos(e); mctx.save();mctx.globalCompositeOperation=erasing?'destination-out':'source-over';
+ mctx.fillStyle='rgba(112,87,255,.55)';mctx.beginPath();mctx.arc(x,y,brush/2,0,Math.PI*2);mctx.fill();mctx.restore();
+}
+mask.addEventListener('pointerdown',e=>{drawing=true;mask.setPointerCapture(e.pointerId);paint(e)});
+mask.addEventListener('pointermove',paint);
+mask.addEventListener('pointerup',()=>drawing=false);
+document.querySelector('#brush').onclick=()=>erasing=false;
+document.querySelector('#erase').onclick=()=>erasing=true;
+document.querySelector('#size').oninput=e=>{brush=+e.target.value;document.querySelector('#sizeV').textContent=brush};
+document.querySelector('#clearMask').onclick=()=>mctx.clearRect(0,0,mask.width,mask.height);
+document.querySelector('#selectAll').onclick=()=>{mctx.clearRect(0,0,mask.width,mask.height);mctx.fillStyle='rgba(112,87,255,.35)';mctx.fillRect(0,0,mask.width,mask.height)};
+
+function applyFilters(){
+ photo.style.filter=`brightness(${100+edits.brightness}%) contrast(${100+edits.contrast}%) saturate(${100+edits.saturation}%)`;
+}
+[['brightness','bv'],['contrast','cv'],['saturation','sv']].forEach(([a,b])=>{
+ document.querySelector('#'+a).oninput=e=>{edits[a]=+e.target.value;document.querySelector('#'+b).textContent=e.target.value;applyFilters()}
+});
+function snapshot(){history.push(JSON.stringify(edits));future=[]}
+document.querySelector('#undo').onclick=()=>{if(history.length>1){future.push(history.pop());edits=JSON.parse(history.at(-1));sync()}}
+document.querySelector('#redo').onclick=()=>{if(future.length){edits=JSON.parse(future.pop());history.push(JSON.stringify(edits));sync()}}
+function sync(){for(const k in edits){document.querySelector('#'+k).value=edits[k];document.querySelector('#'+k[0]+'v')?.replaceWith(document.createTextNode(edits[k]))}applyFilters()}
+
+document.querySelector('#reset').onclick=()=>{edits={brightness:0,contrast:0,saturation:0};sync();mctx.clearRect(0,0,mask.width,mask.height);snapshot()};
+
+document.querySelector('#save').onclick=()=>{
+ if(!loaded)return; const c=document.createElement('canvas'),ctx=c.getContext('2d');
+ c.width=photo.naturalWidth;c.height=photo.naturalHeight;
+ ctx.filter=`brightness(${100+edits.brightness}%) contrast(${100+edits.contrast}%) saturate(${100+edits.saturation}%)`;
+ ctx.drawImage(photo,0,0,c.width,c.height); const a=document.createElement('a');a.download='ai-photo-editor-v4.png';a.href=c.toDataURL('image/png');a.click();
+};
+
+document.querySelector('#ai').onclick=async()=>{
+ const p=document.querySelector('#prompt').value.trim(), out=document.querySelector('#aiStatus');
+ if(!p){out.textContent='Сначала напишите команду AI.';return}
+ out.textContent='Отправляем фото и маску на AI…';
+ const mc=mask.toDataURL('image/png');
+ try{
+  const r=await fetch('/api/edit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({prompt:p,image:photo.src,mask:mc})});
+  if(!r.ok)throw new Error(await r.text());
+  const d=await r.json(); if(d.image){photo.src=d.image; mctx.clearRect(0,0,mask.width,mask.height);out.textContent='Готово ✓';snapshot()} else throw new Error('AI не вернул изображение');
+ }catch(e){out.textContent=e.message || 'Ошибка AI. Проверьте сервер и OPENAI_API_KEY.'}
+};
+document.querySelector('#status').textContent='Готово — загрузите фото';
+</script>
+</body>
+</html>

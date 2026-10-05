@@ -10,7 +10,7 @@ def index():
 
 @app.get('/api/health')
 def health():
-    return jsonify(ok=True, configured=bool(os.environ.get('
+    return jsonify(ok=True, configured=bool(os.environ.get('OPENAI_API_KEY')))
 def data_url_to_bytes(s):
     if not s:
         raise ValueError('Invalid image data')
